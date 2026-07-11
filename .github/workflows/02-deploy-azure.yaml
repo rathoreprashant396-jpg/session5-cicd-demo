@@ -94,9 +94,6 @@ jobs:
           pytest app/ -v
 
       # ---- Step 5: Authenticate to Azure -------------------------------------
-      # Azure's version of the PDF's "Authenticate to Google Cloud" step.
-      # AZURE_CREDENTIALS is a service principal JSON - the "robot employee"
-      # that is allowed to touch ONLY our resource group, nothing else.
       - name: Azure login
         uses: azure/login@v2
         with:
