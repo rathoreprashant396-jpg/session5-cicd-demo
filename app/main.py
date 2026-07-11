@@ -52,7 +52,7 @@ else:
 
 app = FastAPI(
     title="GenAI App",
-    description="AI-powered application using FastAPI and Google Gemini",
+    description="Session 5 Demo",
     version="1.0.0",
 )
 
@@ -119,7 +119,7 @@ def generate_ai_response(
 async def root():
     """Welcome endpoint - lists the available routes."""
     return {
-        "message": "Welcome to GenAI App!",
+        "message": "Welcome to the GenAI App!",
         "description": "AI-powered application using FastAPI and Google Gemini",
         "endpoints": {
             "docs": "/docs",
