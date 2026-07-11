@@ -11,9 +11,11 @@
 | Path | What it is |
 |------|-----------|
 | [`app/`](app/) | The same FastAPI + Gemini app from Sessions 3–4, now with **unit tests** ([`test_main.py`](app/test_main.py)) |
-| [`.github/workflows/01-ci.yaml`](.github/workflows/01-ci.yaml) | **CI only** — tests + Docker build on every push/PR. Nothing ships. |
+| [`.github/workflows/01-ci.yaml`](.github/workflows/01-ci.yaml) | **CI only** — format check + lint + tests + Docker build on every push/PR. Nothing ships. |
 | [`.github/workflows/02-deploy-azure.yaml`](.github/workflows/02-deploy-azure.yaml) | **Full CI/CD** — test → build → verify → push to ACR → deploy to Azure Container Apps |
 | [`02-azure-container-apps/`](02-azure-container-apps/) | Session 4's one-shot provisioning scripts — you run `deploy.ps1`/`deploy.sh` **once** to create the Azure resources the pipeline updates forever after |
+| [`.flake8`](.flake8) | flake8 lint rules — the same ones CI and your local pre-commit hook enforce |
+| [`.pre-commit-config.yaml`](.pre-commit-config.yaml) | Runs black (auto-fix) then flake8 (lint) on `app/` before every local commit, so failures never reach CI |
 
 ## CI vs CD in one table (the restaurant, again)
 
@@ -31,8 +33,36 @@ Open [`01-ci.yaml`](.github/workflows/01-ci.yaml) side-by-side with this list:
 2. **Jobs** — self-contained clean VMs. `01-ci.yaml` has two (`test`, then
    `docker-build` via `needs:`) to show sequencing; `02-deploy-azure.yaml` uses one
    combined job so build and deploy share the same runner and image.
-3. **Steps** — recipe lines executed top to bottom: checkout → install → test →
-   build → deploy. Each one deterministic, each one visible in the Actions log.
+3. **Steps** — recipe lines executed top to bottom: checkout → install → format check →
+   lint → test → build → deploy. Each one deterministic, each one visible in the Actions log.
+
+## Linting: black + flake8 in CI + a local pre-commit hook
+
+`01-ci.yaml`'s `test` job runs `black --check` then `flake8 app/` right after
+installing dependencies — before tests or the Docker build even start, so a
+style/error problem fails fast and cheap. flake8 only *reports* problems (it has
+no auto-fix); black is the one that actually rewrites code — reflowing long
+lines, quotes, spacing — so most formatting issues never reach a flake8 failure
+in the first place. Rules live in [`.flake8`](.flake8) (100-char line length,
+matching black's `--line-length=100`; `__pycache__`, `.pytest_cache`, and the
+Azure scripts folder excluded).
+
+To catch — and auto-fix — the same issues **before** they ever reach GitHub,
+install the pre-commit hook once per clone:
+
+```bash
+pip install -r app/requirements-dev.txt   # installs black + flake8 + pre-commit
+pre-commit install                        # wires the hook into .git/hooks/pre-commit
+```
+
+From then on, every `git commit` runs black (rewriting staged files in `app/` if
+needed) and then flake8 against them. If black changes anything, the commit is
+blocked so you can review the diff — `git add` the reformatted files and commit
+again. Run either step on demand without committing:
+
+```bash
+pre-commit run --all-files
+```
 
 ## The PDF deploys to GCP — we deploy to Azure. Same recipe, different kitchen:
 
@@ -68,8 +98,17 @@ gh repo create genai-cicd --private --source . --push   # or add a remote manual
 ```
 
 The moment this lands on GitHub, the **CI workflow already runs** (green tick =
-tests + Docker build passed). The deploy workflow fails until you finish the
-steps below — that's expected: it's missing its secrets.
+format check + lint + tests + Docker build passed). The deploy workflow fails
+until you finish the steps below — that's expected: it's missing its secrets.
+
+Before your first commit, install the pre-commit hook so formatting/lint issues
+are caught and fixed locally instead of in CI (see
+[Linting](#linting-black--flake8-in-ci--a-local-pre-commit-hook) above):
+
+```bash
+pip install -r app/requirements-dev.txt
+pre-commit install
+```
 
 ## Step 1 — Provision Azure once (the pipeline updates, it doesn't create)
 
@@ -127,13 +166,15 @@ GitHub repo → **Actions** tab → watch both workflows live. The full journey:
 1. You push to main
 2. GitHub triggers both workflows
 3. Runner checks out code onto a clean VM
-4. Unit tests run                       ← broken code stops HERE
-5. Docker image built (tags: commit-hash + latest)
-6. Container booted and /health checked ← broken image stops HERE
-7. Image pushed to ACR (Azure's container warehouse)
-8. az containerapp update points the app at the new commit-hash tag
-9. Live /health check on the public URL ← bad deploy fails LOUDLY here
-10. Your change is live. You did nothing but `git push`.
+4. black --check verifies formatting    ← unformatted code stops HERE
+5. flake8 lints app/                    ← style/error problems stop HERE
+6. Unit tests run                       ← broken code stops HERE
+7. Docker image built (tags: commit-hash + latest)
+8. Container booted and /health checked ← broken image stops HERE
+9. Image pushed to ACR (Azure's container warehouse)
+10. az containerapp update points the app at the new commit-hash tag
+11. Live /health check on the public URL ← bad deploy fails LOUDLY here
+12. Your change is live. You did nothing but `git push`.
 ```
 
 3–5 minutes later the deploy job's log prints your live URL and Swagger docs link.

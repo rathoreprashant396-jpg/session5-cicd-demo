@@ -47,6 +47,15 @@ jobs:
       - name: Install dependencies
         run: pip install -r app/requirements.txt -r app/requirements-dev.txt
 
+      # Lint/format gate: fail fast, before we spend time on tests or a Docker
+      # build. Same checks a contributor's pre-commit hook runs locally (see
+      # .pre-commit-config.yaml), so CI only ever catches what was skipped.
+      - name: Check formatting with black
+        run: black --check --line-length=100 app/
+
+      - name: Lint with flake8
+        run: flake8 app/
+
       - name: Run unit tests
         run: pytest app/ -v
 

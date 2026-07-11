@@ -65,9 +65,15 @@ class PromptRequest(BaseModel):
     """Request body for POST /api/generate."""
 
     prompt: str = Field(..., min_length=1, max_length=5000, description="User prompt for AI")
-    model: Optional[str] = Field(default="gemini-2.5-flash", description="Gemini model to use")
-    temperature: Optional[float] = Field(default=0.7, ge=0.0, le=1.0, description="Creativity (0-1)")
-    max_tokens: Optional[int] = Field(default=1000, ge=1, le=8000, description="Max response length")
+    model: Optional[str] = Field(
+        default="gemini-2.5-flash", description="A Gemini llm model that needs to be used"
+    )
+    temperature: Optional[float] = Field(
+        default=0.7, ge=0.0, le=1.0, description="Creativity (0-1)"
+    )
+    max_tokens: Optional[int] = Field(
+        default=1000, ge=1, le=8000, description="Max response length"
+    )
 
 
 class AIResponse(BaseModel):

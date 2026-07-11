@@ -1,5 +1,6 @@
 # Test-only dependencies - installed in CI, never baked into the Docker image.
 pytest==8.3.4
-# google-genai 1.5.0 (in requirements.txt) needs httpx>=0.28.1, so the pin
-# here must stay compatible with it or pip's resolver fails in clean CI runs.
 httpx==0.28.1
+flake8==7.1.1
+black==24.10.0
+pre-commit==4.0.1

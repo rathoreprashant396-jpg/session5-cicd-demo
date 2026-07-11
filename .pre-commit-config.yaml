@@ -1,0 +1,15 @@
+repos:
+  # Auto-fixer: reflows long lines, quotes, spacing. Runs first so flake8
+  # only has to catch what black can't (unused imports, undefined names, ...).
+  - repo: https://github.com/psf/black
+    rev: 24.10.0
+    hooks:
+      - id: black
+        files: ^app/
+        args: [--line-length=100]
+
+  - repo: https://github.com/pycqa/flake8
+    rev: 7.1.1
+    hooks:
+      - id: flake8
+        files: ^app/

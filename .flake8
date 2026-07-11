@@ -1,0 +1,12 @@
+[flake8]
+max-line-length = 100
+# black formats differently around slices/operators than pycodestyle expects;
+# these are black's own recommended ignores for flake8 compatibility.
+extend-ignore = E203, W503
+exclude =
+    .git,
+    __pycache__,
+    .pytest_cache,
+    .venv,
+    venv,
+    02-azure-container-apps
