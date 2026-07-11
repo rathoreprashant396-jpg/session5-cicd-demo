@@ -28,6 +28,8 @@ on:
       - '/app/**'
   pull_request:
     branches: [main]
+    files:
+      - '/app/**'    
   workflow_dispatch:
 
 # ---- 2. THE JOBS -----------------------------------------------------------
