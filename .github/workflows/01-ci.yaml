@@ -23,7 +23,9 @@ name: CI - Test and Build GenAI App
 # workflow_dispatch adds a manual "Run workflow" button in the Actions tab.
 on:
   push:
-    branches: [main]
+    branches: [feature/*]
+    files:
+      - '/app/**'
   pull_request:
     branches: [main]
   workflow_dispatch:
