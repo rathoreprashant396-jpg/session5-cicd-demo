@@ -120,7 +120,7 @@ def generate_ai_response(
 async def root():
     """Welcome endpoint - lists the available routes."""
     return {
-        "message": "Welcome to the GenAI App!",
+        "message": "Welcome to GenAI App!",
         "description": "AI-powered application using FastAPI and Google Gemini",
         "endpoints": {
             "docs": "/docs",
