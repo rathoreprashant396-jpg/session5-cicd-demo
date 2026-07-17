@@ -1,0 +1,159 @@
+# ============================================================================
+# WORKFLOW 2 - FULL CI/CD (the "conveyor belt to production")
+# ============================================================================
+# This is the Session 5 deploy.yaml, targeting Azure instead of GCP.
+# The PDF deploys to Cloud Run via Artifact Registry; we deploy to Azure
+# Container Apps via Azure Container Registry (ACR) - same concepts, the
+# Azure names we already used in Session 4:
+#
+#   PDF (GCP)                          ->  This file (Azure)
+#   ------------------------------------------------------------------
+#   google-github-actions/auth         ->  azure/login
+#   GCP_SA_KEY (service account JSON)  ->  AZURE_CREDENTIALS (service principal JSON)
+#   Artifact Registry                  ->  Azure Container Registry (ACR)
+#   docker push ...pkg.dev/...         ->  docker push <acr>.azurecr.io/...
+#   gcloud run deploy                  ->  az containerapp update
+#
+# One push to main = test -> build -> verify -> push -> deploy -> health check.
+# If ANY step fails, everything after it is skipped: broken code never ships.
+#
+# NOTE: we build the image ON THE RUNNER with plain `docker build` instead of
+# `az acr build`, because ACR Tasks is disabled on free-trial / Azure-for-
+# Students subscriptions (the TasksOperationsNotAllowed error from Session 4).
+# The GitHub runner is our free build machine - and it's amd64, so there are
+# no Apple-Silicon architecture headaches either.
+#
+# Required GitHub repository secrets (Settings -> Secrets and variables -> Actions):
+#   AZURE_CREDENTIALS - JSON output of:
+#       az ad sp create-for-rbac --name genai-ci --role contributor --scopes /subscriptions/c3ea1d5b-3d8d-4b4a-9078-981b0d250390/resourceGroups/genai-session4-rg --sdk-auth
+#   ACR_NAME          - your registry name WITHOUT .azurecr.io
+#                       (printed by 02-azure-container-apps/deploy.ps1|sh)
+#   GEMINI_API_KEY    - Gemini key, used only for the container smoke test here;
+#                       the deployed app reads it from its Container App secret.
+#
+# Assumes the resource group / ACR / Container App already exist -
+# run 02-azure-container-apps/deploy.ps1 (or .sh) ONCE first.
+# ============================================================================
+
+name: CI/CD - Build, Test and Deploy GenAI to Azure
+
+# ---- Step 1: Name and Trigger ----------------------------------------------
+# Deploy only on pushes to main (PRs get the CI-only workflow instead).
+on:
+  push:
+    branches: [main]
+
+env:
+  RESOURCE_GROUP: genai-session4-rg
+  APP_NAME: genai-app
+  IMAGE_NAME: genai-app
+
+jobs:
+  # ---- Step 2: Define the deployment job ------------------------------------
+  # Build and deploy live in ONE job so they share the same runner and the
+  # same freshly built Docker image (faster than splitting into two jobs).
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      # ---- Step 3: Checkout repository --------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ---- Step 3.5: Fail fast if secrets are missing -------------------------
+      # A missing GitHub secret expands to an EMPTY STRING, not an error - which
+      # produces confusing failures much later (e.g. an invalid image tag like
+      # ".azurecr.io/app"). Catch that here with a readable message instead.
+      - name: Check required secrets
+        run: |
+          missing=0
+          if [ -z "${{ secrets.AZURE_CREDENTIALS }}" ]; then
+            echo "::error::Missing repository secret AZURE_CREDENTIALS (service principal JSON - see README Step 2)"
+            missing=1
+          fi
+          if [ -z "${{ secrets.ACR_NAME }}" ]; then
+            echo "::error::Missing repository secret ACR_NAME (registry name without .azurecr.io - find it with: az acr list --resource-group genai-session4-rg --query \"[].name\" -o tsv)"
+            missing=1
+          fi
+          if [ -z "${{ secrets.GEMINI_API_KEY }}" ]; then
+            echo "::error::Missing repository secret GEMINI_API_KEY (needed for the container smoke test)"
+            missing=1
+          fi
+          exit $missing
+
+      # ---- Step 4: Run unit tests (the CI gate) ------------------------------
+      # "Testing is mandatory: if tests fail, deployment never happens."
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run unit tests
+        run: |
+          pip install -r app/requirements.txt -r app/requirements-dev.txt
+          pytest app/ -v
+
+      # ---- Step 5: Authenticate to Azure -------------------------------------
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      # ---- Step 6: Build the Docker image (two tags) --------------------------
+      # Tag 1 (commit hash) = permanent, reproducible snapshot of THIS version.
+      # Tag 2 (latest)      = convenience pointer to the newest build.
+      - name: Build Docker image
+        run: |
+          docker build \
+            -t ${{ secrets.ACR_NAME }}.azurecr.io/$IMAGE_NAME:${{ github.sha }} \
+            -t ${{ secrets.ACR_NAME }}.azurecr.io/$IMAGE_NAME:latest \
+            ./app
+
+      # ---- Step 7: Test the Docker image --------------------------------------
+      # Boot the container we just built and hit /health before shipping it.
+      # If the app can't start, the pipeline dies HERE - not in production.
+      - name: Smoke-test the container
+        run: |
+          docker run -d --rm --name smoke -p 8000:8000 \
+            -e GEMINI_API_KEY="${{ secrets.GEMINI_API_KEY }}" \
+            ${{ secrets.ACR_NAME }}.azurecr.io/$IMAGE_NAME:${{ github.sha }}
+          sleep 5
+          curl -f http://localhost:8000/health
+          docker stop smoke
+
+      # ---- Step 8: Push the image to ACR ---------------------------------------
+      # Azure's "container warehouse" - the PDF's Artifact Registry step.
+      # `az acr login` wires docker up with a short-lived token (no password
+      # ever appears in the workflow).
+      - name: Push Docker image to ACR
+        run: |
+          az acr login --name ${{ secrets.ACR_NAME }}
+          docker push ${{ secrets.ACR_NAME }}.azurecr.io/$IMAGE_NAME:${{ github.sha }}
+          docker push ${{ secrets.ACR_NAME }}.azurecr.io/$IMAGE_NAME:latest
+
+      # ---- Step 9: Deploy to Azure Container Apps -------------------------------
+      # The PDF's `gcloud run deploy`, in Azure. We deploy the COMMIT-HASH tag,
+      # never :latest - so every deployment is traceable to an exact commit
+      # and rolling back = redeploying a previous hash.
+      # The GEMINI_API_KEY env var stays wired to the Container App secret
+      # created in Session 4 (secretref) - the key itself never appears here.
+      - name: Deploy to Azure Container Apps
+        run: |
+          az containerapp update \
+            --name $APP_NAME \
+            --resource-group $RESOURCE_GROUP \
+            --image ${{ secrets.ACR_NAME }}.azurecr.io/$IMAGE_NAME:${{ github.sha }} \
+            --set-env-vars "GEMINI_API_KEY=secretref:gemini-api-key"
+
+      # ---- Step 10: Verify the live deployment ----------------------------------
+      # Ask Azure for the app's public URL and hit /health. A failed check
+      # fails the workflow, so a bad deploy is loudly visible in GitHub.
+      - name: Health check the live app
+        run: |
+          FQDN=$(az containerapp show --name $APP_NAME --resource-group $RESOURCE_GROUP \
+            --query properties.configuration.ingress.fqdn -o tsv)
+          echo "Deployed to: https://$FQDN"
+          sleep 20
+          curl -f "https://$FQDN/health"
+          echo ""
+          echo "Live URL:     https://$FQDN"
+          echo "Swagger docs: https://$FQDN/docs"

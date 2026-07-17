@@ -79,7 +79,6 @@ jobs:
             missing=1
           fi
           exit $missing
-
       # ---- Step 4: Run unit tests (the CI gate) ------------------------------
       # "Testing is mandatory: if tests fail, deployment never happens."
       - name: Set up Python
@@ -91,7 +90,6 @@ jobs:
         run: |
           pip install -r app/requirements.txt -r app/requirements-dev.txt
           pytest app/ -v
-
       # ---- Step 5: Authenticate to Azure -------------------------------------
       - name: Azure login
         uses: azure/login@v2
@@ -107,7 +105,6 @@ jobs:
             -t ${{ secrets.ACR_NAME }}.azurecr.io/$IMAGE_NAME:${{ github.sha }} \
             -t ${{ secrets.ACR_NAME }}.azurecr.io/$IMAGE_NAME:latest \
             ./app
-
       # ---- Step 7: Test the Docker image --------------------------------------
       # Boot the container we just built and hit /health before shipping it.
       # If the app can't start, the pipeline dies HERE - not in production.
@@ -119,7 +116,6 @@ jobs:
           sleep 5
           curl -f http://localhost:8000/health
           docker stop smoke
-
       # ---- Step 8: Push the image to ACR ---------------------------------------
       # Azure's "container warehouse" - the PDF's Artifact Registry step.
       # `az acr login` wires docker up with a short-lived token (no password
@@ -129,7 +125,6 @@ jobs:
           az acr login --name ${{ secrets.ACR_NAME }}
           docker push ${{ secrets.ACR_NAME }}.azurecr.io/$IMAGE_NAME:${{ github.sha }}
           docker push ${{ secrets.ACR_NAME }}.azurecr.io/$IMAGE_NAME:latest
-
       # ---- Step 9: Deploy to Azure Container Apps -------------------------------
       # The PDF's `gcloud run deploy`, in Azure. We deploy the COMMIT-HASH tag,
       # never :latest - so every deployment is traceable to an exact commit
@@ -143,7 +138,6 @@ jobs:
             --resource-group $RESOURCE_GROUP \
             --image ${{ secrets.ACR_NAME }}.azurecr.io/$IMAGE_NAME:${{ github.sha }} \
             --set-env-vars "GEMINI_API_KEY=secretref:gemini-api-key"
-
       # ---- Step 10: Verify the live deployment ----------------------------------
       # Ask Azure for the app's public URL and hit /health. A failed check
       # fails the workflow, so a bad deploy is loudly visible in GitHub.
